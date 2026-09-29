@@ -1,0 +1,886 @@
+{
+  "name": "Long Term Memory AI Agent With Web Search Tool",
+  "nodes": [
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Trigger').item.json.message.text }}",
+        "needsFallback": true,
+        "options": {
+          "systemMessage": "=You are an AI assistant developed by Tharun and you have two types of memory.\n\n1. Recent Memory\nYou automatically receive the most recent conversation messages.\nAlways try to answer using these first.\n\n2. Long-Term Memory Tool\nYou have access to a Long-Term Memory tool.\n\nUse this tool ONLY when:\n- the user refers to previous conversations\n- the user says \"remember\"\n- the user asks about old projects\n- the user asks about previous decisions\n- the user asks about previous conversations\n- the answer is not available in the recent conversation\n\nDo NOT use the tool for general knowledge questions.\n\nIf recent messages are sufficient, answer directly without using the tool.\n\nRecent Conversation:\n{{ $json.conversation }}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        576,
+        160
+      ],
+      "id": "409a8659-3a8b-49ac-9e8e-5de6e71afabe",
+      "name": "AI Agent",
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -448,
+        112
+      ],
+      "id": "d6715b09-a205-4664-90a9-ecd012091f87",
+      "name": "Trigger",
+      "webhookId": "a75595eb-9faa-4e7f-b1ec-45a18932d0c2",
+      "credentials": {
+        "telegramApi": {
+          "id": "9w2PHalLx7jDezUC",
+          "name": "SM-Agent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c0299ec9-18c7-4ec5-b260-790d20df9d6b",
+              "leftValue": "={{ $json.message.text }}",
+              "rightValue": "/reset",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -224,
+        112
+      ],
+      "id": "14d8a295-6385-44e6-9fd4-97fb4c58bf6a",
+      "name": "Routing Message"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM recent_memory_of_LTM_agent\nWHERE chat_id = $1;",
+        "options": {
+          "queryReplacement": "={{ $('Trigger').item.json.message.chat.id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        16
+      ],
+      "id": "6630a5c5-7ef7-45d8-acdc-bd296ac6fac9",
+      "name": "Delete Short Term Memory",
+      "credentials": {
+        "postgres": {
+          "id": "WrQwPbGl2Zthu7A9",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR-PINECONE-HOST.pinecone.io/vectors/delete",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "pineconeApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Pinecone-Api-Version",
+              "value": "2025-10"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"namespace\": \"__default__\",\n  \"filter\": {\n    \"chat_id\": {\n      \"$eq\": \"{{ $('Trigger').item.json.message.chat.id }}\"\n    }\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        224,
+        16
+      ],
+      "id": "285ffa8b-0cc5-4515-824a-a97dd4938ba9",
+      "name": "Delete Long Term Memory",
+      "credentials": {
+        "pineconeApi": {
+          "id": "NK8SaubhkmTAEoPH",
+          "name": "Pinecone account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Trigger').item.json.message.chat.id }}",
+        "text": "Memory Cleared Starting Fresh",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        640,
+        0
+      ],
+      "id": "113c4d41-c2d7-4340-be35-1f62db76a913",
+      "name": "Send Message About Memory Deletion",
+      "webhookId": "5b450e22-f5a8-411d-95b3-c3f673dafe91",
+      "credentials": {
+        "telegramApi": {
+          "id": "9w2PHalLx7jDezUC",
+          "name": "SM-Agent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT role, message \nFROM (\n    SELECT id, role, message\n    FROM recent_memory_of_LTM_agent\n    WHERE chat_id = $1\n    ORDER BY id DESC\n    LIMIT 30\n) sub\nORDER BY id ASC;",
+        "options": {
+          "queryReplacement": "={{ $json.message.chat.id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        272
+      ],
+      "id": "465a6abe-6301-4b86-ae2e-17ef183dd419",
+      "name": "Get Recent Messages",
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "credentials": {
+        "postgres": {
+          "id": "WrQwPbGl2Zthu7A9",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get all incoming items\nconst items = $input.all();\n\n// Keep only valid messages\nconst conversation = items\n  .filter(item =>\n    item.json &&\n    item.json.role &&\n    item.json.message &&\n    item.json.message.trim() !== \"\"\n  )\n  .map(item => `${item.json.role.toUpperCase()}: ${item.json.message}`)\n  .join(\"\\n\\n\");\n\n// Return an empty conversation if nothing exists\nreturn [\n  {\n    json: {\n      conversation\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        272
+      ],
+      "id": "2b107f0d-d9d2-4a1f-898a-bd485eab6e2f",
+      "name": "Build Conversation Format"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        464,
+        400
+      ],
+      "id": "70fd68a8-88e6-45ca-9026-84e3e5084e9f",
+      "name": "GPT-OSS-120B",
+      "credentials": {
+        "groqApi": {
+          "id": "H9x3xQy6H0LLkQBm",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        592,
+        400
+      ],
+      "id": "776a743a-b5fc-4fb8-bac2-2efec8ba0e73",
+      "name": "FLASH-3",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "klL9E4HFlH4Dwvt6",
+          "name": "gemini-excel"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Search the user's previous conversations.\n\nUse when the user:\n- refers to previous discussions\n- asks \"remember...\"\n- asks about previous projects\n- asks about earlier decisions\n- asks about past goals or preferences\n\nReturns detailed summaries of relevant previous conversations.\n\nDo not use for general knowledge or questions answerable from recent messages.\n\nFrame relative query to get the previous conversation",
+        "method": "POST",
+        "url": "https://YOUR-PINECONE-HOST.pinecone.io/records/namespaces/__default__/search",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "pineconeApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Pinecone-Api-Version",
+              "value": "2025-10"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"query\": {\n    \"inputs\": {\n      \"text\": \"{{ $fromAI('query') }}\"\n    },\n    \"top_k\": 3,\n    \"filter\": {\n      \"chat_id\": { \"$eq\": \"{{ $('Trigger').item.json.message.chat.id }}\" }\n    }\n  },\n  \"fields\": [\n    \"text\",\n    \"chat_id\"\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        720,
+        400
+      ],
+      "id": "94fc66d1-bb82-4b93-86e3-ed4e585c66c2",
+      "name": "Get Long Term Memory",
+      "credentials": {
+        "pineconeApi": {
+          "id": "NK8SaubhkmTAEoPH",
+          "name": "Pinecone account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Search Use this tool to search the live internet for up-to-date, real-time, or current information, news, live weather, external documentation, or recent events.\n\nUse ONLY when:\n\nThe user asks about real-time/current events, live data, or recent updates after your knowledge cutoff.\nThe user explicitly requests a web search or external documentation check.",
+        "query": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Query', ``, 'string') }}",
+        "options": {}
+      },
+      "type": "@tavily/n8n-nodes-tavily.tavilyTool",
+      "typeVersion": 1,
+      "position": [
+        848,
+        400
+      ],
+      "id": "6c14c87a-bf10-4bb6-a7f5-7fdf6f7f0ee1",
+      "name": "Tavily",
+      "credentials": {
+        "tavilyApi": {
+          "id": "kL71kDoduid8cOjN",
+          "name": "Tavily account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Trigger').item.json.message.chat.id }}",
+        "text": "=Sorry there was an Error,Please Try again Later",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1072,
+        32
+      ],
+      "id": "1623575d-8661-4cdf-8a5f-eced295a7ffd",
+      "name": "Send Error Message",
+      "webhookId": "035f0b43-1927-4f48-be55-b7ccf35766b7",
+      "credentials": {
+        "telegramApi": {
+          "id": "9w2PHalLx7jDezUC",
+          "name": "SM-Agent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.output }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1072,
+        368
+      ],
+      "id": "3d0f5af0-eb74-425b-8b1b-caae6defbf1c",
+      "name": "Send Reply",
+      "webhookId": "bc565a26-a316-4c16-9c19-de7410abaffe",
+      "credentials": {
+        "telegramApi": {
+          "id": "9w2PHalLx7jDezUC",
+          "name": "SM-Agent"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO recent_memory_of_LTM_agent (chat_id, role, message)\nVALUES ($1, 'user', $2);",
+        "options": {
+          "queryReplacement": "={{ $('Trigger').item.json.message.chat.id }},{{ $('Trigger').item.json.message.text }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -448,
+        704
+      ],
+      "id": "2798624e-c37c-4136-9b54-1e51b1922ecc",
+      "name": "Add User Message To Short Term Memory",
+      "credentials": {
+        "postgres": {
+          "id": "WrQwPbGl2Zthu7A9",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO recent_memory_of_LTM_agent (chat_id, role, message)\nVALUES ($1, 'assistant', $2);",
+        "options": {
+          "queryReplacement": "={{ $('Trigger').item.json.message.chat.id }},{{ $('AI Agent').item.json.output }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -224,
+        704
+      ],
+      "id": "3e2afd8e-971a-4669-84cb-654aeee0901e",
+      "name": "Add Assistant Message To Short Term Memory",
+      "credentials": {
+        "postgres": {
+          "id": "WrQwPbGl2Zthu7A9",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COUNT(*) AS total\nFROM recent_memory_of_LTM_agent\nWHERE chat_id = $1;",
+        "options": {
+          "queryReplacement": "={{ $('Trigger').item.json.message.chat.id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        704
+      ],
+      "id": "f2ba3f21-5b92-4d69-a2bc-a4c48bbd52f1",
+      "name": "Get Total Number Of Recent Messages",
+      "credentials": {
+        "postgres": {
+          "id": "WrQwPbGl2Zthu7A9",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "ffba9fac-7d2a-4e1c-9647-613c9664d8ed",
+              "leftValue": "={{ $json.total }}",
+              "rightValue": 30,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        224,
+        704
+      ],
+      "id": "9381b5f3-2a83-45e6-abbf-c9c11948318e",
+      "name": "Check Recent Messages Limit"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT role, message\nFROM recent_memory_of_LTM_agent\nWHERE chat_id = $1\nORDER BY id ASC\nLIMIT 20;",
+        "options": {
+          "queryReplacement": "={{ $('Trigger').item.json.message.chat.id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        448,
+        704
+      ],
+      "id": "1b1f5fe7-7213-43a3-9f1b-036ca0dd8621",
+      "name": "Get 20 Latest Messages",
+      "credentials": {
+        "postgres": {
+          "id": "WrQwPbGl2Zthu7A9",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get all incoming items\nconst items = $input.all();\n\n// Merge them into a single conversation string\nconst conversation = items\n  .map(item => `${item.json.role.toUpperCase()}: ${item.json.message}`)\n  .join(\"\\n\\n\");\n\n// Return one item\nreturn [\n  {\n    json: {\n      conversation\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        704
+      ],
+      "id": "11f04183-2647-4992-ab29-bf359a7da119",
+      "name": "Build Conversation"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.conversation}}",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "You are an episodic memory creator.  Summarize the following.  \nKeep:  \n- technical discussions \n- architecture decisions \n- project decisions \n- user goals \n- user preferences \n- mistakes made \n- conclusions \n- unresolved questions \n- if any code generated, preserve it like that only  \nRemove:  \n- greetings \n- thank you \n- repetitive replies \n- filler conversation  \nThe summary must be understandable without reading the original conversation.  Return ONLY the summary."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        896,
+        704
+      ],
+      "id": "3ba78af8-6348-4ebb-b28e-ba04462bfde1",
+      "name": "Summarize Conversation"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-20b",
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        976,
+        832
+      ],
+      "id": "b6cd84ef-c4b1-421e-b935-0ac0c116bb5a",
+      "name": "GPT-OSS-20B",
+      "credentials": {
+        "groqApi": {
+          "id": "H9x3xQy6H0LLkQBm",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR-PINECONE-HOST.pinecone.io/records/namespaces/__default__/upsert",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "pineconeApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Pinecone-Api-Version",
+              "value": "2025-10"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"_id\": \"{{ $('Trigger').item.json.message.chat.id }}_{{ $now.toMillis() }}\",\n  \"text\": {{ JSON.stringify($json.text) }},\n  \"chat_id\": \"{{ $('Trigger').item.json.message.chat.id }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1248,
+        704
+      ],
+      "id": "49720e5c-4318-4d53-837a-df2f7f94f490",
+      "name": "Upsert Into Long Term Memory",
+      "credentials": {
+        "pineconeApi": {
+          "id": "NK8SaubhkmTAEoPH",
+          "name": "Pinecone account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM recent_memory_of_LTM_agent\nWHERE id IN (\n    SELECT id\n    FROM recent_memory_of_LTM_agent\n    WHERE chat_id = $1\n    ORDER BY id ASC\n    LIMIT 20\n);",
+        "options": {
+          "queryReplacement": "={{ $('Trigger').item.json.message.chat.id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1472,
+        704
+      ],
+      "id": "38aafa53-fdff-4f6d-b5cb-ded4c105c58a",
+      "name": "Delete Recent 20 Messages ",
+      "credentials": {
+        "postgres": {
+          "id": "WrQwPbGl2Zthu7A9",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "# AI MEMORY ASSISTANT\n\nA Telegram-based AI assistant designed with **two layers of memory**: short-term conversation history stored in PostgreSQL and persistent long-term memories stored in Pinecone.\n\nThe AI Agent uses recent conversations first and intelligently retrieves relevant historical memories only when needed. **Tavily** is available as a web-search tool for current information and recent events.\n\nWhen the short-term conversation reaches its limit, the workflow automatically **summarizes the important context and stores it as long-term memory**, then removes the older messages to keep the active context lightweight.\n\nUsers can also send **`/reset`** to completely clear both short-term and long-term memory and start a fresh conversation.\n",
+        "height": 416,
+        "width": 640
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1248,
+        112
+      ],
+      "typeVersion": 1,
+      "id": "f9b28c50-c6f4-412f-8946-faa7f3f11206",
+      "name": "Sticky Note"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Send Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Error Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger": {
+      "main": [
+        [
+          {
+            "node": "Routing Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Routing Message": {
+      "main": [
+        [
+          {
+            "node": "Delete Short Term Memory",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Recent Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Short Term Memory": {
+      "main": [
+        [
+          {
+            "node": "Delete Long Term Memory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Long Term Memory": {
+      "main": [
+        [
+          {
+            "node": "Send Message About Memory Deletion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Message About Memory Deletion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Recent Messages": {
+      "main": [
+        [
+          {
+            "node": "Build Conversation Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Conversation Format": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT-OSS-120B": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FLASH-3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Get Long Term Memory": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tavily": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Reply": {
+      "main": [
+        [
+          {
+            "node": "Add User Message To Short Term Memory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add User Message To Short Term Memory": {
+      "main": [
+        [
+          {
+            "node": "Add Assistant Message To Short Term Memory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Assistant Message To Short Term Memory": {
+      "main": [
+        [
+          {
+            "node": "Get Total Number Of Recent Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Total Number Of Recent Messages": {
+      "main": [
+        [
+          {
+            "node": "Check Recent Messages Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Recent Messages Limit": {
+      "main": [
+        [
+          {
+            "node": "Get 20 Latest Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get 20 Latest Messages": {
+      "main": [
+        [
+          {
+            "node": "Build Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Conversation": {
+      "main": [
+        [
+          {
+            "node": "Summarize Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize Conversation": {
+      "main": [
+        [
+          {
+            "node": "Upsert Into Long Term Memory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT-OSS-20B": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Summarize Conversation",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Into Long Term Memory": {
+      "main": [
+        [
+          {
+            "node": "Delete Recent 20 Messages ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "d6ab45ac-c6b6-4348-85a9-9b1e1d625f50",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1630a9b5a6440a44170b073990650ae9a4fd64d7853e1ab0afc6f4352ebda0d8"
+  },
+  "nodeGroups": [],
+  "id": "8e21ExpI6ATqfcde",
+  "tags": []
+}
